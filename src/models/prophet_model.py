@@ -58,6 +58,13 @@ class ProphetModel:
         })
         future["spend"] = spend_value
 
+        # predictive_samples() draws from numpy's global RNG with no seed
+        # argument of its own - unseeded, it produces a different result on
+        # every call even for the same fitted model (verified: two
+        # back-to-back calls differed by ~$400 on a ~$138k P50). Seed it
+        # explicitly so predict() is reproducible, per "random_state=42
+        # everywhere."
+        np.random.seed(42)
         samples = self.model.predictive_samples(future)["yhat"]  # shape (max_period, uncertainty_samples)
         samples = np.clip(samples, a_min=0, a_max=None)
 
