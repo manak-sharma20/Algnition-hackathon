@@ -99,6 +99,19 @@ Use plain English. No bullet points. No headers within paragraphs. Write as if e
   return callGroq(prompt)
 }
 
+// Battle View: one-sentence tradeoff comparison between two budget
+// allocations (not one of the three forecast-report roles above).
+export async function compareAllocations({ allocationA, allocationB }) {
+  const prompt = `You are a media planner comparing two budget allocations for an e-commerce client.
+
+Allocation A: $${allocationA.totalBudget.toFixed(2)} total budget, projected revenue $${allocationA.totalRevenue.toFixed(2)}, blended ROAS ${allocationA.roas.toFixed(2)}x.
+Allocation B: $${allocationB.totalBudget.toFixed(2)} total budget, projected revenue $${allocationB.totalRevenue.toFixed(2)}, blended ROAS ${allocationB.roas.toFixed(2)}x.
+
+In exactly one sentence, state which allocation is the better tradeoff and why. Plain English, no jargon.`
+
+  return callGroq(prompt)
+}
+
 // Role C: top-3 ranked operational risks across all channels, as JSON.
 export async function getRiskJson({ channelsData, horizonDays }) {
   const channelBlocks = channelsData
