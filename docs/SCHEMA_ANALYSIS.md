@@ -60,3 +60,12 @@ Zero nulls across all columns in all three files.
 - Minimum series length for Prophet: 60 rows. All campaigns in sample data have 90 rows — Prophet safe for all.
 - XGBoost feature columns derived from this schema: `spend`, plus lag/rolling features computed by `generate_features.py`
 - Ridge regression target: `revenue`; features must be scaled (StandardScaler already in pipeline)
+
+---
+
+## Update — real challenge dataset vs. sample CSVs
+
+The hackathon brief links a Drive folder (`AIgnition_dataset`) with the actual judging files: `google_ads_campaign_stats.csv`, `meta_ads_campaign_stats.csv`, and `bing_campaign_stats.csv` — larger real exports, not the clean synthetic samples above. Two differences from this analysis to note:
+
+- Filename prefix is `bing_`, not `ms_ads_` — `generate_features.py`'s channel inference matches on keyword (`bing`/`microsoft`/`ms`) rather than an exact prefix, so both naming schemes resolve to channel `ms`.
+- Real ad-platform exports won't necessarily share this doc's exact column names (e.g. `Cost` vs. `spend`, `Campaign` vs. `campaign_name`) or even include a `campaign_type` column. `generate_features.py` normalizes common aliases and, when `campaign_type` is absent entirely, infers it from keywords in the campaign name (see `docs/ASSUMPTIONS.md`). The pipeline was validated end-to-end against the sample CSVs above, not the real files directly (they weren't fetched during development).
