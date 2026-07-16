@@ -10,7 +10,8 @@ import pandas as pd
 
 from models.tribunal import ForecastingTribunal
 
-OUTPUT_COLUMNS = [
+# Required columns, in the required order, first - judged output format.
+REQUIRED_COLUMNS = [
     "channel",
     "campaign_type",
     "campaign_name",
@@ -24,6 +25,13 @@ OUTPUT_COLUMNS = [
     "disagreement_pct",
     "uncertainty_level",
 ]
+
+# Appended after the required columns for the War Room UI's Tribunal Verdict
+# Panel (per-model P50 agreement badges). prophet_p50 is blank when Prophet
+# was skipped for that campaign (fewer than 60 days of history).
+EXTRA_COLUMNS = ["prophet_p50", "xgb_p50", "ridge_p50"]
+
+OUTPUT_COLUMNS = REQUIRED_COLUMNS + EXTRA_COLUMNS
 
 
 def main():
@@ -46,7 +54,7 @@ def main():
     out_df = pd.DataFrame(rows)[OUTPUT_COLUMNS]
     out_df = out_df.sort_values(["channel", "campaign_type", "campaign_name", "period_days"]).reset_index(drop=True)
 
-    for col in ["revenue_p10", "revenue_p50", "revenue_p90", "roas_p10", "roas_p50", "roas_p90"]:
+    for col in ["revenue_p10", "revenue_p50", "revenue_p90", "roas_p10", "roas_p50", "roas_p90", *EXTRA_COLUMNS]:
         out_df[col] = out_df[col].round(2)
     out_df["disagreement_pct"] = out_df["disagreement_pct"].round(1)
 

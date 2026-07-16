@@ -129,6 +129,11 @@ class ForecastingTribunal:
                     "roas_p90": roas["p90"],
                     "disagreement_pct": disagreement_pct,
                     "uncertainty_level": _uncertainty_level(disagreement_pct),
+                    # Per-model P50s for the Tribunal Verdict Panel's agreement badges.
+                    # Not part of the required predictions.csv columns - appended after them.
+                    "prophet_p50": model_predictions["prophet"][period_days]["p50"] if "prophet" in model_predictions else None,
+                    "xgb_p50": model_predictions["xgb"][period_days]["p50"],
+                    "ridge_p50": model_predictions["ridge"][period_days]["p50"],
                 }
             results[campaign_name] = campaign_results
 
