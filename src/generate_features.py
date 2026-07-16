@@ -5,6 +5,7 @@ CLI: python src/generate_features.py --data-dir ./data --out features.parquet
 import argparse
 import glob
 import os
+import re
 import sys
 
 import numpy as np
@@ -22,9 +23,87 @@ CHANNEL_KEYWORDS = [
     ("ms", "ms"),
 ]
 
-# Real ad-platform exports don't share one column-naming convention, so incoming
-# headers are normalized (case/whitespace-insensitive) against this alias table
-# before the required-column check runs.
+# The real challenge dataset ships three genuinely different raw export
+# schemas (Google Ads API report, Bing Ads report, Meta Ads report) - not
+# variations on one naming convention. Each is mapped explicitly rather than
+# through a shared alias table. `conversions`/`campaign_type` of None means
+# that field isn't in this platform's export at all (Meta has neither).
+GOOGLE_SCHEMA = {
+    "date": "segments_date",
+    "campaign_name": "campaign_name",
+    "campaign_type": "campaign_advertising_channel_type",
+    "spend": "metrics_cost_micros",  # Google reports cost in micros - divide by 1e6
+    "revenue": "metrics_conversions_value",
+    "impressions": "metrics_impressions",
+    "clicks": "metrics_clicks",
+    "conversions": "metrics_conversions",
+}
+BING_SCHEMA = {
+    "date": "TimePeriod",
+    "campaign_name": "CampaignName",
+    "campaign_type": "CampaignType",
+    "spend": "Spend",
+    "revenue": "Revenue",
+    "impressions": "Impressions",
+    "clicks": "Clicks",
+    "conversions": "Conversions",
+}
+META_SCHEMA = {
+    "date": "date_start",
+    "campaign_name": "campaign_name",
+    "campaign_type": None,  # not present - inferred from campaign name
+    "spend": "spend",
+    # Meta's "conversion" column is conversion VALUE (revenue), not a count -
+    # verified against the real export: values are fractional currency
+    # amounts (e.g. 163.20, 286.77) that frequently exceed the click count,
+    # and there is no separate conversion-count column in this export at all.
+    "revenue": "conversion",
+    "impressions": "impressions",
+    "clicks": "clicks",
+    "conversions": None,  # not available in this export - filled with 0
+}
+
+SCHEMA_DETECTORS = [
+    ("google", "segments_date", GOOGLE_SCHEMA),
+    ("bing", "TimePeriod", BING_SCHEMA),
+    ("meta", "date_start", META_SCHEMA),
+]
+
+# Real platform "advertising channel type" enums, normalized (lowercased,
+# whitespace/underscores stripped) to our canonical vocabulary. Anything not
+# listed here falls back to "other". `search` is refined to `brand` below
+# when the campaign name carries a `_TM_` (trademark/brand-term) marker -
+# `_NTM_` (non-trademark) safely does NOT match that substring.
+RAW_CAMPAIGN_TYPE_MAP = {
+    "performancemax": "shopping",
+    "search": "search",
+    "shopping": "shopping",
+    "display": "display",
+    "video": "display",
+    "demandgen": "display",
+    "audience": "display",
+}
+
+# Used only when a file has no campaign_type column at all (Meta), or for our
+# own clean sample schema if it omits the column. Checked in order - first
+# match wins - so more specific intent signals (remarketing/prospecting) are
+# checked before generic keywords like "brand"/"search".
+CAMPAIGN_TYPE_KEYWORDS = [
+    ("remarketing", "retargeting"),
+    ("retarget", "retargeting"),
+    ("prospecting", "display"),
+    ("shopping", "shopping"),
+    ("pmax", "shopping"),
+    ("performance_max", "shopping"),
+    ("brand", "brand"),
+    ("search", "search"),
+    ("display", "display"),
+    ("generic", "search"),
+]
+
+# Generic alias table for our own clean sample CSV schema (date, spend,
+# revenue, ... with obvious column names) - kept as a fallback for any file
+# that doesn't match one of the three real schemas above.
 COLUMN_ALIASES = {
     "date": "date",
     "campaign": "campaign_name",
@@ -46,18 +125,6 @@ COLUMN_ALIASES = {
     "purchases": "conversions",
 }
 
-# Used only when a file has no campaign_type column at all.
-CAMPAIGN_TYPE_KEYWORDS = [
-    ("shopping", "shopping"),
-    ("pmax", "shopping"),
-    ("performance_max", "shopping"),
-    ("brand", "brand"),
-    ("retarget", "retargeting"),
-    ("prospecting", "display"),
-    ("search", "search"),
-    ("display", "display"),
-]
-
 
 def infer_channel(path):
     lower = os.path.basename(path).lower()
@@ -78,6 +145,25 @@ def infer_campaign_type(campaign_name):
     return "other"
 
 
+def _normalize_type_key(raw_type):
+    return re.sub(r"[\s_]+", "", str(raw_type).strip().lower())
+
+
+def canonicalize_campaign_type(raw_type, campaign_name):
+    canonical = RAW_CAMPAIGN_TYPE_MAP.get(_normalize_type_key(raw_type), "other")
+    if canonical == "search" and "_tm_" in str(campaign_name).lower():
+        canonical = "brand"
+    return canonical
+
+
+def detect_schema(columns):
+    cols = set(columns)
+    for schema_name, marker_column, schema in SCHEMA_DETECTORS:
+        if marker_column in cols:
+            return schema_name, schema
+    return "generic", None
+
+
 def normalize_columns(df):
     rename_map = {}
     for col in df.columns:
@@ -87,10 +173,35 @@ def normalize_columns(df):
     return df.rename(columns=rename_map)
 
 
-def load_channel_csv(path):
-    df = pd.read_csv(path)
-    df = normalize_columns(df)
+def _load_known_schema(raw, path, schema_name, schema):
+    out = pd.DataFrame(index=raw.index)
+    for field in ["date", "campaign_name", "spend", "revenue", "impressions", "clicks"]:
+        source_column = schema[field]
+        if source_column not in raw.columns:
+            raise ValueError(
+                f"{path} looks like a {schema_name} export but is missing expected column "
+                f"'{source_column}'. Columns found: {list(raw.columns)}"
+            )
+        out[field] = raw[source_column]
 
+    if schema_name == "google":
+        out["spend"] = out["spend"] / 1_000_000  # micros -> currency units
+
+    out["conversions"] = raw[schema["conversions"]] if schema["conversions"] else 0
+
+    if schema["campaign_type"]:
+        raw_types = raw[schema["campaign_type"]]
+        out["campaign_type"] = [
+            canonicalize_campaign_type(t, name) for t, name in zip(raw_types, out["campaign_name"])
+        ]
+    else:
+        out["campaign_type"] = out["campaign_name"].apply(infer_campaign_type)
+
+    return out
+
+
+def _load_generic_schema(raw, path):
+    df = normalize_columns(raw)
     missing = [c for c in REQUIRED_COLUMNS if c not in df.columns]
     if missing:
         raise ValueError(
@@ -102,6 +213,18 @@ def load_channel_csv(path):
         df["campaign_type"] = df["campaign_type"].astype(str).str.strip().str.lower()
     else:
         df["campaign_type"] = df["campaign_name"].apply(infer_campaign_type)
+
+    return df
+
+
+def load_channel_csv(path):
+    raw = pd.read_csv(path)
+    schema_name, schema = detect_schema(raw.columns)
+
+    if schema is not None:
+        df = _load_known_schema(raw, path, schema_name, schema)
+    else:
+        df = _load_generic_schema(raw, path)
 
     df["channel"] = infer_channel(path)
     df["date"] = pd.to_datetime(df["date"])
@@ -118,16 +241,18 @@ def load_all(data_dir):
 
 
 def validate_campaign_consistency(df):
-    """Each campaign_name must map to exactly one channel and one campaign_type."""
-    grouped = df.groupby("campaign_name").agg(
-        channels=("channel", "nunique"),
-        campaign_types=("campaign_type", "nunique"),
-    )
-    bad = grouped[(grouped["channels"] > 1) | (grouped["campaign_types"] > 1)]
+    """Each (channel, campaign_name) pair must map to exactly one campaign_type.
+
+    Campaign names are NOT required to be unique across channels - the same
+    name (e.g. "Pmax_NTM_Campaign_01") legitimately exists as different,
+    unrelated campaigns in both the Google and Bing exports.
+    """
+    grouped = df.groupby(["channel", "campaign_name"]).agg(campaign_types=("campaign_type", "nunique"))
+    bad = grouped[grouped["campaign_types"] > 1]
     if not bad.empty:
         raise ValueError(
-            "Inconsistent campaign_name -> channel/campaign_type mapping found for: "
-            f"{list(bad.index)}. A campaign_name must belong to a single channel and campaign_type."
+            "Inconsistent campaign_type for the same (channel, campaign_name): "
+            f"{list(bad.index)}. Each campaign must have a single campaign_type within its channel."
         )
 
 
