@@ -64,15 +64,19 @@ export function roasBand(roas) {
 export const UNCERTAINTY_BAND = { LOW: 'good', MODERATE: 'warning', HIGH: 'critical' }
 
 // Fixed categorical assignment, never cycled - same channel is always the
-// same color across every view.
+// same color across every view. Trio (blue/magenta/yellow) validated all-pairs
+// for CVD separation + contrast on the void surface; hex mirrors the Tailwind
+// token for canvas rendering.
 export const CHANNEL_META = {
-  google: { label: 'Google Ads', dot: 'bg-series-blue', text: 'text-series-blue' },
-  meta: { label: 'Meta Ads', dot: 'bg-series-violet', text: 'text-series-violet' },
-  ms: { label: 'Microsoft Ads', dot: 'bg-series-aqua', text: 'text-series-aqua' },
+  google: { label: 'Google Ads', dot: 'bg-series-blue', text: 'text-series-blue', hex: '#3987e5' },
+  meta: { label: 'Meta Ads', dot: 'bg-series-magenta', text: 'text-series-magenta', hex: '#d55181' },
+  ms: { label: 'Microsoft Ads', dot: 'bg-series-yellow', text: 'text-series-yellow', hex: '#c98500' },
 }
 
 export function channelMeta(channel) {
-  return CHANNEL_META[channel] ?? { label: channel, dot: 'bg-neutral-500', text: 'text-neutral-400' }
+  return (
+    CHANNEL_META[channel] ?? { label: channel, dot: 'bg-neutral-500', text: 'text-neutral-400', hex: '#898781' }
+  )
 }
 
 export const STATUS_CLASSES = {
@@ -91,8 +95,16 @@ export const STATUS_CLASSES = {
   },
 }
 
+// Campaign names repeat across channels (google and bing both export e.g.
+// Search_TM_Campaign_02), so overrides must be keyed by (channel, campaign) -
+// keying by campaign_name alone let budgets leak between channels (same bug
+// the training pipeline fixed by keying the tribunal per channel).
+export function overrideKey(row) {
+  return `${row.channel}|${row.campaign_name}`
+}
+
 // Converts a {channel: totalBudget} map (what Battle View's two allocation
-// columns edit) into a {campaign_name: budget} map (what aggregateByChannel's
+// columns edit) into a {overrideKey: budget} map (what aggregateByChannel's
 // budgetOverrides expects) by splitting each channel's total across its
 // campaigns in proportion to their baseline budget share.
 export function channelBudgetsToCampaignOverrides(rows, channelBudgets) {
@@ -108,7 +120,7 @@ export function channelBudgetsToCampaignOverrides(rows, channelBudgets) {
     const channelBaseline = baselineByChannel[row.channel] ?? 0
     const campaignCount = rows.filter((r) => r.channel === row.channel).length
     const share = channelBaseline > 0 ? baselineBudget(row) / channelBaseline : 1 / campaignCount
-    overrides[row.campaign_name] = channelTotal * share
+    overrides[overrideKey(row)] = channelTotal * share
   }
   return overrides
 }
@@ -119,7 +131,7 @@ export function aggregateByChannel(rows, budgetOverrides, level) {
   const byChannel = {}
 
   for (const row of rows) {
-    const budget = budgetOverrides[row.campaign_name] ?? baselineBudget(row)
+    const budget = budgetOverrides[overrideKey(row)] ?? baselineBudget(row)
     const revenue = simulateRevenue(row, budget, level)
 
     if (!byChannel[row.channel]) {
