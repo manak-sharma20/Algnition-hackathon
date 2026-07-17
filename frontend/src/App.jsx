@@ -2,14 +2,15 @@ import Papa from 'papaparse'
 import React, { useEffect, useMemo, useState } from 'react'
 import BattleView from './components/BattleView'
 import ChannelCommandCenter from './components/ChannelCommandCenter'
+import GlobeScene from './components/GlobeScene'
 import RiskDial from './components/RiskDial'
 import TribunalVerdictPanel from './components/TribunalVerdictPanel'
-import { aggregateByChannel, coerceRow } from './utils/forecast'
+import { aggregateByChannel, coerceRow, overrideKey } from './utils/forecast'
 
 const TABS = [
-  { key: 'command', label: 'Channel Command Center' },
-  { key: 'verdict', label: 'Tribunal Verdict Panel' },
-  { key: 'battle', label: 'Battle View' },
+  { key: 'command', label: 'Command' },
+  { key: 'verdict', label: 'Tribunal' },
+  { key: 'battle', label: 'Battle' },
 ]
 
 const PERIODS = [30, 60, 90]
@@ -21,6 +22,7 @@ export default function App() {
   const [periodDays, setPeriodDays] = useState(30)
   const [budgetOverrides, setBudgetOverrides] = useState({})
   const [activeTab, setActiveTab] = useState('command')
+  const [selectedChannel, setSelectedChannel] = useState(null)
 
   useEffect(() => {
     fetch('/predictions.csv')
@@ -63,77 +65,99 @@ export default function App() {
     setBudgetOverrides((prev) => {
       const next = { ...prev }
       for (const campaign of current.campaigns) {
-        next[campaign.campaign_name] = campaign.budget * scale
+        next[overrideKey(campaign)] = campaign.budget * scale
       }
       return next
     })
   }
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white p-6 md:p-8">
-      <header className="mb-6">
-        <h1 className="text-2xl font-bold mb-1">War Room — AIgnition 3.0</h1>
-        <p className="text-gray-400 text-sm">Probabilistic revenue forecasting across Google, Meta, and Microsoft Ads</p>
+    <div className="relative min-h-dvh text-white">
+      {/* The intelligence engine — always present, reframed per section */}
+      <GlobeScene mode={activeTab} activeChannel={selectedChannel} onSelectChannel={setSelectedChannel} />
+
+      {/* Top bar */}
+      <header className="fixed inset-x-0 top-0 z-30 flex h-16 items-center justify-between px-6 md:px-10">
+        <div className="flex items-baseline gap-3">
+          <span className="text-[13px] font-semibold tracking-[0.34em] text-white">WAR ROOM</span>
+          <span className="hidden text-[10px] tracking-[0.2em] text-white/35 sm:block">AIGNITION 3.0</span>
+        </div>
+
+        <nav className="absolute left-1/2 flex -translate-x-1/2 items-center gap-8">
+          {TABS.map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={`relative py-2 text-[11px] font-medium uppercase tracking-[0.28em] transition-colors duration-500 ${
+                activeTab === tab.key ? 'text-white' : 'text-white/35 hover:text-white/70'
+              }`}
+            >
+              {tab.label}
+              <span
+                className={`absolute -bottom-0.5 left-1/2 h-px -translate-x-1/2 bg-white transition-all duration-500 ease-premium ${
+                  activeTab === tab.key ? 'w-6 opacity-100' : 'w-0 opacity-0'
+                }`}
+              />
+            </button>
+          ))}
+        </nav>
+
+        <label className="btn-ghost">
+          Load CSV
+          <input type="file" accept=".csv" className="hidden" onChange={handleFileUpload} />
+        </label>
       </header>
 
-      <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
-        <RiskDial level={level} onChange={setLevel} />
+      {loadError && (
+        <div className="fixed inset-x-0 top-20 z-40 flex justify-center px-6">
+          <div className="panel max-w-xl px-5 py-3 text-sm text-status-critical" style={{ borderColor: 'rgba(208,59,59,0.35)' }}>
+            Couldn't load default predictions.csv ({loadError}). Run ./run.sh, then use "Load CSV" above.
+          </div>
+        </div>
+      )}
 
-        <div className="flex items-center gap-3">
-          <div className="flex rounded-lg border border-neutral-700 overflow-hidden text-sm">
+      {/* Content layer — leans gently against the cursor for depth */}
+      <main
+        className="relative z-10"
+        style={{
+          transform: 'translate3d(calc(var(--par-x, 0) * -7px), calc(var(--par-y, 0) * -5px), 0)',
+          willChange: 'transform',
+        }}
+      >
+        <div key={activeTab} className="scene-enter">
+          {activeTab === 'command' && (
+            <ChannelCommandCenter
+              channels={channels}
+              level={level}
+              onBudgetChange={handleChannelBudgetChange}
+              periodDays={periodDays}
+              selectedChannel={selectedChannel}
+              onSelectChannel={setSelectedChannel}
+            />
+          )}
+          {activeTab === 'verdict' && <TribunalVerdictPanel rows={filteredRows} horizonDays={periodDays} />}
+          {activeTab === 'battle' && <BattleView rows={filteredRows} />}
+        </div>
+      </main>
+
+      {/* Control dock — risk appetite and planning horizon, present everywhere */}
+      <div className="pointer-events-none fixed inset-x-0 bottom-5 z-30 flex justify-center px-4">
+        <div className="panel pointer-events-auto flex items-center gap-4 !rounded-full px-4 py-2">
+          <RiskDial level={level} onChange={setLevel} />
+          <div className="h-5 w-px bg-white/10" />
+          <div className="seg">
             {PERIODS.map((p) => (
               <button
                 key={p}
                 onClick={() => setPeriodDays(p)}
-                className={`px-3 py-1.5 ${
-                  periodDays === p ? 'bg-white text-gray-950 font-semibold' : 'bg-neutral-900 text-neutral-300'
-                }`}
+                className={`seg-btn ${periodDays === p ? 'is-active' : ''}`}
               >
                 {p}d
               </button>
             ))}
           </div>
-
-          <label className="text-sm text-neutral-300 cursor-pointer rounded-lg border border-neutral-700 px-3 py-1.5 hover:bg-neutral-900">
-            Load predictions.csv
-            <input type="file" accept=".csv" className="hidden" onChange={handleFileUpload} />
-          </label>
         </div>
       </div>
-
-      {loadError && (
-        <div className="mb-6 rounded-lg border border-status-critical/40 bg-status-critical/10 px-4 py-2 text-sm text-status-critical">
-          Couldn't load default predictions.csv ({loadError}). Run ./run.sh, then use "Load predictions.csv" above.
-        </div>
-      )}
-
-      <nav className="flex gap-1 mb-6 border-b border-neutral-800">
-        {TABS.map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${
-              activeTab === tab.key
-                ? 'border-series-blue text-white'
-                : 'border-transparent text-neutral-400 hover:text-neutral-200'
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </nav>
-
-      <main>
-        {activeTab === 'command' && (
-          <ChannelCommandCenter channels={channels} level={level} onBudgetChange={handleChannelBudgetChange} />
-        )}
-        {activeTab === 'verdict' && (
-          <TribunalVerdictPanel rows={filteredRows} horizonDays={periodDays} />
-        )}
-        {activeTab === 'battle' && (
-          <BattleView rows={filteredRows} />
-        )}
-      </main>
     </div>
   )
 }
