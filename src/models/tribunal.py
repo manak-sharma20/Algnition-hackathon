@@ -40,55 +40,62 @@ class ForecastingTribunal:
         self.prophet_models = {}
         self.xgb_models = {}
         self.ridge_models = {}
-        self.campaign_info = {}  # campaign_name -> {"channel", "campaign_type"}
+        # Keyed by (channel, campaign_name), NOT campaign_name alone - the
+        # same campaign name can legitimately exist in more than one channel
+        # (verified against the real dataset: 27 names like
+        # "Pmax_NTM_Campaign_01" collide between Google and Bing as
+        # unrelated campaigns).
+        self.campaign_info = {}  # (channel, campaign_name) -> {"channel", "campaign_type"}
         self.feature_columns = FEATURE_COLUMNS
         self.ensemble_weights = ENSEMBLE_WEIGHTS
 
     def fit(self, df):
-        for campaign_name, group in df.groupby("campaign_name", sort=False):
+        for (channel, campaign_name), group in df.groupby(["channel", "campaign_name"], sort=False):
             group = group.sort_values("date")
-            self.campaign_info[campaign_name] = {
-                "channel": group["channel"].iloc[0],
+            key = (channel, campaign_name)
+            self.campaign_info[key] = {
+                "channel": channel,
                 "campaign_type": group["campaign_type"].iloc[0],
             }
 
             X = group[FEATURE_COLUMNS]
             y = group["revenue"]
-            self.xgb_models[campaign_name] = XGBModel().fit(X, y)
-            self.ridge_models[campaign_name] = RidgeModel().fit(X, y)
+            self.xgb_models[key] = XGBModel().fit(X, y)
+            self.ridge_models[key] = RidgeModel().fit(X, y)
 
             if len(group) >= MIN_PROPHET_ROWS:
                 series = group.rename(columns={"date": "ds", "revenue": "y"})[["ds", "y", "spend"]]
-                self.prophet_models[campaign_name] = ProphetModel().fit(series)
+                self.prophet_models[key] = ProphetModel().fit(series)
         return self
 
     def predict(self, df, periods=(30, 60, 90), future_spend_overrides=None):
-        """Returns {campaign_name: {period_days: {...predictions.csv row fields...}}}.
+        """Returns {(channel, campaign_name): {period_days: {...predictions.csv row fields...}}}.
 
-        future_spend_overrides: optional {campaign_name: daily_spend} to
-        simulate a different future budget instead of the trailing 28-day
+        future_spend_overrides: optional {(channel, campaign_name): daily_spend}
+        to simulate a different future budget instead of the trailing 28-day
         average daily spend.
         """
         future_spend_overrides = future_spend_overrides or {}
         results = {}
 
-        for campaign_name, info in self.campaign_info.items():
-            group = df[df["campaign_name"] == campaign_name].sort_values("date")
+        for key, info in self.campaign_info.items():
+            channel, campaign_name = key
+            group = df[(df["channel"] == channel) & (df["campaign_name"] == campaign_name)].sort_values("date")
             if group.empty:
                 continue
 
-            override = future_spend_overrides.get(campaign_name)
+            override = future_spend_overrides.get(key)
             daily_spend = override if override is not None else group["spend"].tail(28).mean()
 
             future_row = group[FEATURE_COLUMNS].tail(1).copy()
             future_row["spend"] = daily_spend
 
             model_predictions = {
-                "xgb": self.xgb_models[campaign_name].predict(future_row, periods=periods),
-                "ridge": self.ridge_models[campaign_name].predict(future_row, periods=periods),
+                "xgb": self.xgb_models[key].predict(future_row, periods=periods),
+                "ridge": self.ridge_models[key].predict(future_row, periods=periods),
             }
-            if campaign_name in self.prophet_models:
-                model_predictions["prophet"] = self.prophet_models[campaign_name].predict(
+            if key in self.prophet_models:
+                model_predictions["prophet"] = self.prophet_models[key].predict(
                     periods=periods, future_spend=daily_spend
                 )
 
@@ -135,7 +142,7 @@ class ForecastingTribunal:
                     "xgb_p50": model_predictions["xgb"][period_days]["p50"],
                     "ridge_p50": model_predictions["ridge"][period_days]["p50"],
                 }
-            results[campaign_name] = campaign_results
+            results[key] = campaign_results
 
         return results
 
