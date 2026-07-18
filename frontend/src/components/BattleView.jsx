@@ -1,5 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { compareAllocations } from '../utils/claudeApi'
+import FloatingPanel from './FloatingPanel'
+import MiniGlobe from './MiniGlobe'
+import RollingNumber from './RollingNumber'
 import { aggregateByChannel, channelBudgetsToCampaignOverrides, channelMeta, formatCurrency } from '../utils/forecast'
 
 function buildAllocation(baselineChannels) {
@@ -16,29 +19,46 @@ function summarize(rows, allocation) {
   return { channels, totalBudget, totalRevenue, roas: totalBudget > 0 ? totalRevenue / totalBudget : 0 }
 }
 
-function AllocationColumn({ label, allocation, onChange, channels, summary, isWinner }) {
+function StrategyWorld({ label, allocation, onChange, channels, summary, isWinner, floatDelay }) {
   return (
-    <div className={`rounded-xl border p-4 space-y-4 ${isWinner ? 'border-status-good bg-status-good/5' : 'border-neutral-800 bg-neutral-900'}`}>
-      <div className="flex items-center justify-between">
-        <h3 className="font-semibold">{label}</h3>
-        {isWinner && (
-          <span className="rounded-full bg-status-good/15 px-2 py-0.5 text-xs font-semibold text-status-good">
-            WINNER
-          </span>
-        )}
+    <FloatingPanel
+      floatDelay={floatDelay}
+      className="p-6"
+      style={isWinner ? { borderColor: 'rgba(12,163,12,0.35)', boxShadow: '0 32px 64px -28px rgba(0,0,0,0.85), 0 0 60px -18px rgba(12,163,12,0.25), inset 0 1px 0 rgba(255,255,255,0.06)' } : undefined}
+    >
+      <div className="flex items-start justify-between">
+        <div>
+          <div className="eyebrow">{label}</div>
+          <div className="mt-1 text-[10px] uppercase tracking-[0.2em] text-white/30">Strategy world</div>
+        </div>
+        <span
+          className={`inline-flex items-center gap-1.5 rounded-full bg-status-good/15 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-status-good transition-opacity duration-700 ${
+            isWinner ? 'opacity-100' : 'opacity-0'
+          }`}
+        >
+          ✓ Winner
+        </span>
       </div>
 
-      <div className="space-y-3">
+      {/* This world's own globe */}
+      <div className="flex justify-center py-2">
+        <MiniGlobe size={150} highlight={isWinner} />
+      </div>
+
+      <div className="space-y-4">
         {channels.map((c) => {
           const meta = channelMeta(c.channel)
           return (
             <label key={c.channel} className="block">
-              <span className={`text-xs ${meta.text}`}>{meta.label}</span>
-              <div className="mt-1 flex items-center rounded-lg border border-neutral-700 bg-neutral-950 px-2">
-                <span className="text-neutral-500 text-sm">$</span>
+              <span className="flex items-center gap-2 text-[10px] uppercase tracking-[0.2em] text-white/40">
+                <span className="h-1.5 w-1.5 rounded-full" style={{ background: meta.hex }} />
+                {meta.label}
+              </span>
+              <div className="mt-1 flex items-baseline gap-1.5">
+                <span className="text-sm text-white/35">$</span>
                 <input
                   type="number"
-                  className="w-full bg-transparent px-2 py-1.5 text-sm tabular-nums focus:outline-none"
+                  className="input-line"
                   value={allocation[c.channel] ?? 0}
                   min={0}
                   onChange={(e) => onChange(c.channel, Number(e.target.value))}
@@ -49,21 +69,32 @@ function AllocationColumn({ label, allocation, onChange, channels, summary, isWi
         })}
       </div>
 
-      <div className="border-t border-neutral-800 pt-3 space-y-1 text-sm">
-        <div className="flex justify-between">
-          <span className="text-neutral-400">Total budget</span>
-          <span className="tabular-nums">{formatCurrency(summary.totalBudget)}</span>
+      {/* Energy flowing from the plan into the outcome */}
+      <div className="flow-line my-5" />
+
+      <div className="space-y-3">
+        <div className="flex items-baseline justify-between">
+          <span className="text-[10px] uppercase tracking-[0.2em] text-white/40">Total budget</span>
+          <RollingNumber value={summary.totalBudget} format={formatCurrency} className="text-sm tabular-nums text-white/75" />
         </div>
-        <div className="flex justify-between">
-          <span className="text-neutral-400">Projected revenue (P50)</span>
-          <span className="tabular-nums font-medium">{formatCurrency(summary.totalRevenue)}</span>
+        <div className="flex items-baseline justify-between">
+          <span className="text-[10px] uppercase tracking-[0.2em] text-white/40">Projected revenue · P50</span>
+          <RollingNumber
+            value={summary.totalRevenue}
+            format={formatCurrency}
+            className="text-[28px] font-extralight leading-none tracking-tight"
+          />
         </div>
-        <div className="flex justify-between">
-          <span className="text-neutral-400">Blended ROAS</span>
-          <span className="tabular-nums font-semibold">{summary.roas.toFixed(2)}x</span>
+        <div className="flex items-baseline justify-between">
+          <span className="text-[10px] uppercase tracking-[0.2em] text-white/40">Blended ROAS</span>
+          <RollingNumber
+            value={summary.roas}
+            format={(v) => `${v.toFixed(2)}x`}
+            className="text-sm font-medium tabular-nums text-white"
+          />
         </div>
       </div>
-    </div>
+    </FloatingPanel>
   )
 }
 
@@ -82,7 +113,11 @@ export default function BattleView({ rows }) {
   }, [rows])
 
   if (!rows.length) {
-    return <div className="text-neutral-400">No forecast data loaded.</div>
+    return (
+      <div className="flex min-h-dvh items-center justify-center">
+        <p className="text-white/40">No forecast data loaded.</p>
+      </div>
+    )
   }
 
   const summaryA = summarize(rows, allocationA)
@@ -100,43 +135,49 @@ export default function BattleView({ rows }) {
   }
 
   return (
-    <div>
-      <p className="text-sm text-neutral-400 mb-4">
-        Compare two budget allocations at the P50 (expected) level. Revenue scales with budget at each channel's
-        current blended ROAS - it doesn't model diminishing returns from heavier spend.
-      </p>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <AllocationColumn
+    <div className="mx-auto max-w-5xl px-6 pb-36 pt-24 md:px-10">
+      <div className="text-center">
+        <div className="eyebrow mb-3">Battle view</div>
+        <h2 className="text-3xl font-extralight tracking-tight md:text-4xl">Two worlds. One budget.</h2>
+        <p className="mx-auto mt-3 max-w-lg text-[13px] leading-relaxed text-white/45">
+          Compare two budget allocations at the P50 (expected) level. Revenue scales with budget at each channel's
+          current blended ROAS — it doesn't model diminishing returns from heavier spend.
+        </p>
+      </div>
+
+      <div className="mt-10 grid gap-6 md:grid-cols-2">
+        <StrategyWorld
           label="Allocation A"
           allocation={allocationA}
           onChange={(channel, value) => setAllocationA((prev) => ({ ...prev, [channel]: value }))}
           channels={baselineChannels}
           summary={summaryA}
           isWinner={winner === 'A'}
+          floatDelay={0}
         />
-        <AllocationColumn
+        <StrategyWorld
           label="Allocation B"
           allocation={allocationB}
           onChange={(channel, value) => setAllocationB((prev) => ({ ...prev, [channel]: value }))}
           channels={baselineChannels}
           summary={summaryB}
           isWinner={winner === 'B'}
+          floatDelay={2.3}
         />
       </div>
 
-      <div className="mt-4">
-        <button
-          onClick={compare}
-          className="text-sm rounded-lg border border-neutral-700 px-3 py-1.5 hover:bg-neutral-900"
-        >
+      <div className="mt-8 flex flex-col items-center gap-4">
+        <button onClick={compare} className="btn-ghost">
           Ask the tribunal to compare tradeoffs
         </button>
         {comparison && (
-          <div className="mt-3 rounded-lg border border-neutral-800 bg-neutral-900 p-3 text-sm text-neutral-300">
-            {comparison.loading && 'Comparing allocations…'}
-            {comparison.error && <span className="text-status-critical">{comparison.error}</span>}
-            {comparison.text && comparison.text}
-          </div>
+          <FloatingPanel className="w-full max-w-2xl px-6 py-4">
+            <div className="text-[13px] leading-relaxed text-white/70">
+              {comparison.loading && <span className="text-white/40">Comparing allocations…</span>}
+              {comparison.error && <span className="text-status-critical">{comparison.error}</span>}
+              {comparison.text && comparison.text}
+            </div>
+          </FloatingPanel>
         )}
       </div>
     </div>
