@@ -39,14 +39,18 @@ Example with custom paths:
 
 ## Output
 
-`predictions.csv` with columns:
-```
-channel, campaign_type, campaign_name, period_days,
-revenue_p10, revenue_p50, revenue_p90,
-roas_p10, roas_p50, roas_p90,
-disagreement_pct, uncertainty_level,
-prophet_p50, xgb_p50, ridge_p50   (appended - used by the War Room UI, see docs/ARCHITECTURE.md)
-```
+`run.sh` writes two files next to `OUTPUT_PATH`:
+
+- **`predictions.csv`** — the scored output, exactly these columns in exactly this order (nothing appended, per the submission guide's strict format requirement):
+  ```
+  channel, campaign_type, campaign_name, period_days,
+  revenue_p10, revenue_p50, revenue_p90,
+  roas_p10, roas_p50, roas_p90,
+  disagreement_pct, uncertainty_level
+  ```
+- **`predictions_detail.csv`** — the same rows plus `prophet_p50, xgb_p50, ridge_p50` (blank when that model was skipped for a campaign), used by the War Room UI's per-model agreement badges. Not scored; see `docs/ARCHITECTURE.md`.
+
+`src/predict.py` also accepts an optional `--budgets path/to/budgets.csv` (columns: `channel,campaign_name,daily_budget`) to forecast against a specified future media budget per campaign instead of assuming trailing spend continues — this is what satisfies the brief's "accepting future media budget inputs" from the CLI/`run.sh` side (the War Room UI's budget simulator is the other, interactive side of this).
 
 ## Input CSV format
 
@@ -59,6 +63,15 @@ Google, Bing, and Meta each export a genuinely different raw schema (different c
 ```bash
 python src/train.py --data-dir ./data --out ./pickle/model.pkl
 ```
+
+## Tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest tests/
+```
+
+Covers the highest-risk logic: per-platform schema mapping and campaign-type canonicalization (including the `_TM_`/`_NTM_` brand signal), P10≤P50≤P90 monotonicity for all three models, composite `(channel, campaign_name)` keying (the fix for real cross-channel name collisions), and the naive-fallback path for sparse/unseen campaigns. Not part of `run.sh` or the scored pipeline.
 
 ## Frontend (War Room UI)
 

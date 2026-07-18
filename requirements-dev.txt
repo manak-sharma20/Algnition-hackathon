@@ -1,0 +1,4 @@
+# Test-only dependency - never needed by run.sh or the scored pipeline,
+# so kept out of requirements.txt (which stays reserved for exactly what
+# the pickled models need to load).
+pytest==9.1.1
