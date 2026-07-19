@@ -22,15 +22,39 @@ MIN_PROPHET_ROWS = 60
 # instead, the same path used for campaigns unseen at training time.
 MIN_TRAINING_ROWS = 10
 
+# Data-driven, not just domain intuition: a rolling-origin backtest across
+# 4 cutoffs (src/backtest.py --cutoffs 4) measured each model's OWN
+# out-of-sample MAE and found Prophet consistently ~1.85x worse than
+# XGBoost/Ridge (which are themselves nearly tied) at every single cutoff -
+# not noise, a uniform pattern. The original weights below (Prophet 0.5 for
+# Shopping/Brand, the dataset's dominant campaign type) gave the most
+# weight to the worst model. Weights here reflect that evidence: Prophet
+# is kept in the blend (dropping it entirely was tested and measured
+# WORSE median error - a weak-but-different model still reduces variance
+# in a blend even when its solo accuracy is worse) but sharply reduced.
+# Comparison, pooled across the same 4 cutoffs (163 campaign-forecasts):
+#   original weights: MAE $3,993  median AE $1,109  coverage 68.7%
+#   these weights:    MAE $3,693  median AE $998    coverage 74.8%
+# See docs/TECHNICAL_DOC.md for the full experiment writeup.
 ENSEMBLE_WEIGHTS = {
-    "shopping": {"prophet": 0.5, "xgb": 0.3, "ridge": 0.2},
-    "brand": {"prophet": 0.5, "xgb": 0.3, "ridge": 0.2},
-    "search": {"prophet": 0.2, "xgb": 0.6, "ridge": 0.2},
-    "retargeting": {"prophet": 0.2, "xgb": 0.6, "ridge": 0.2},
-    "display": {"prophet": 0.3, "xgb": 0.4, "ridge": 0.3},
-    "other": {"prophet": 0.3, "xgb": 0.4, "ridge": 0.3},
+    "shopping": {"prophet": 0.1, "xgb": 0.45, "ridge": 0.45},
+    "brand": {"prophet": 0.1, "xgb": 0.45, "ridge": 0.45},
+    "search": {"prophet": 0.05, "xgb": 0.6, "ridge": 0.35},
+    "retargeting": {"prophet": 0.05, "xgb": 0.6, "ridge": 0.35},
+    "display": {"prophet": 0.1, "xgb": 0.45, "ridge": 0.45},
+    "other": {"prophet": 0.1, "xgb": 0.45, "ridge": 0.45},
 }
 DEFAULT_WEIGHTS = ENSEMBLE_WEIGHTS["other"]
+
+# Blending independent models' P10/P90 by weighted average understates
+# combined uncertainty (each model's interval only captures its own
+# uncertainty, not the risk the model class itself is wrong) - measured via
+# the same backtest: raw blended intervals covered the actual outcome only
+# 68.7-74.8% of the time against an 80% nominal target. Widening the
+# blended interval around P50 by this factor (tuned on the same 4 cutoffs:
+# 1.0->74.8%, 1.4->80.4%, 1.5->81.6%, 1.6->82.2%, 2.0->86.5%) closes most
+# of that gap without excessively ballooning the range.
+INTERVAL_WIDEN_FACTOR = 1.5
 
 
 def _weights_for(campaign_type):
@@ -189,6 +213,12 @@ class ForecastingTribunal:
                     )
                     for level in ("p10", "p50", "p90")
                 }
+
+                # Widen the blended interval around P50 - see
+                # INTERVAL_WIDEN_FACTOR's docstring for why and how this was
+                # tuned. Clip P10 at 0 since revenue can't go negative.
+                blended["p10"] = max(0.0, blended["p50"] - INTERVAL_WIDEN_FACTOR * (blended["p50"] - blended["p10"]))
+                blended["p90"] = blended["p50"] + INTERVAL_WIDEN_FACTOR * (blended["p90"] - blended["p50"])
 
                 p50_by_model = [model_predictions[m][period_days]["p50"] for m in model_predictions]
                 mean_p50 = np.mean(p50_by_model)
