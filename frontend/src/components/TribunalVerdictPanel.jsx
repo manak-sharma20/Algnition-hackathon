@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { getDisagreementNarrative } from '../utils/claudeApi'
+import { getDisagreementNarrative } from '../utils/llmApi'
 import FloatingPanel from './FloatingPanel'
 import RollingNumber from './RollingNumber'
 import { channelMeta, formatCurrency, overrideKey } from '../utils/forecast'

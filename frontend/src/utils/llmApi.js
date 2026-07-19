@@ -3,7 +3,7 @@
 //
 // Uses Groq's free OpenAI-compatible API directly from the browser (no SDK).
 // The challenge brief allows any LLM provider (OpenAI/Gemini/Anthropic/
-// similar); Groq was chosen for its free tier. Mirrors src/claude_narrator.py.
+// similar); Groq was chosen for its free tier. Mirrors src/llm_narrator.py.
 
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions'
 const API_KEY = import.meta.env.VITE_GROQ_API_KEY

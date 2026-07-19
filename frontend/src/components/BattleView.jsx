@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { compareAllocations } from '../utils/claudeApi'
+import { compareAllocations } from '../utils/llmApi'
 import FloatingPanel from './FloatingPanel'
 import MiniGlobe from './MiniGlobe'
 import RollingNumber from './RollingNumber'

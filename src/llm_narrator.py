@@ -4,7 +4,7 @@ explanations and a ranked risk list.
 Standalone reference implementation, not imported by generate_features.py,
 train.py, predict.py, or run.sh. The offline scored pipeline must run with
 no network access; this module is here for local testing / notebook use
-and mirrors what frontend/src/utils/claudeApi.js does in the browser.
+and mirrors what frontend/src/utils/llmApi.js does in the browser.
 
 Uses Groq's OpenAI-compatible chat completions API (free tier, no SDK
 dependency - plain stdlib HTTP so requirements.txt stays limited to what

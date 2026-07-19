@@ -51,8 +51,8 @@ Three independent models, one instance per campaign, each producing a P10/P50/P9
 
 Two parallel, functionally-identical implementations of the same three narrative roles:
 
-- `src/claude_narrator.py` — standalone Python reference implementation (stdlib `urllib`, no SDK), useful for local testing / the demo walkthrough. **Not imported by any pipeline script.**
-- `frontend/src/utils/claudeApi.js` — the real UI integration, called from the browser via `fetch`.
+- `src/llm_narrator.py` — standalone Python reference implementation (stdlib `urllib`, no SDK), useful for local testing / the demo walkthrough. **Not imported by any pipeline script.**
+- `frontend/src/utils/llmApi.js` — the real UI integration, called from the browser via `fetch`.
 
 Roles:
 1. **Disagreement narrator** — 2-3 sentences explaining why the three models disagree on a flagged campaign (Tribunal Verdict Panel, on demand).
